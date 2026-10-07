@@ -23,9 +23,19 @@ class XiaohongshuMcpTests(unittest.TestCase):
         url = "https://sns-video-zl.xhscdn.com/stream/example.mp4"
         self.assertEqual(MODULE._safe_media_url(url), url)
 
+    def test_rejects_insecure_xiaohongshu_media(self):
+        with self.assertRaisesRegex(ValueError, "白名单"):
+            MODULE._safe_media_url("http://sns-video-zl.xhscdn.com/stream/example.mp4")
+
     def test_initialize_declares_tools(self):
-        response = MODULE.handle({"jsonrpc": "2.0", "id": 7, "method": "initialize"})
+        response = MODULE.handle({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05"},
+        })
         self.assertEqual(response["id"], 7)
+        self.assertEqual(response["result"]["protocolVersion"], "2024-11-05")
         self.assertIn("tools", response["result"]["capabilities"])
 
 

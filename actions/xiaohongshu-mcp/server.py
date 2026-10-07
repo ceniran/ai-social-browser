@@ -4,6 +4,7 @@
 import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,16 +15,10 @@ from pathlib import Path
 
 
 ACTION_URL = os.environ.get("XHS_ACTION_URL", "http://127.0.0.1:8273/xiaohongshu")
-FFMPEG = os.environ.get("XHS_FFMPEG", "/usr/bin/ffmpeg")
-FFPROBE = os.environ.get("XHS_FFPROBE", "/usr/bin/ffprobe")
-WHISPER = os.environ.get(
-    "XHS_WHISPER",
-    "/var/lib/dwell/codex-telegram/tools/whisper.cpp/build/bin/whisper-cli",
-)
-WHISPER_MODEL = os.environ.get(
-    "XHS_WHISPER_MODEL",
-    "/var/lib/dwell/codex-telegram/tools/whisper.cpp/models/ggml-tiny.bin",
-)
+FFMPEG = os.environ.get("XHS_FFMPEG") or shutil.which("ffmpeg")
+FFPROBE = os.environ.get("XHS_FFPROBE") or shutil.which("ffprobe")
+WHISPER = os.environ.get("XHS_WHISPER") or shutil.which("whisper-cli")
+WHISPER_MODEL = os.environ.get("XHS_WHISPER_MODEL")
 MAX_VIDEO_BYTES = int(os.environ.get("XHS_MAX_VIDEO_BYTES", str(100 * 1024 * 1024)))
 MAX_VIDEO_SECONDS = float(os.environ.get("XHS_MAX_VIDEO_SECONDS", "600"))
 
@@ -114,6 +109,10 @@ def _download_video(url, target):
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     total = 0
     with urllib.request.urlopen(request, timeout=30) as response, target.open("wb") as output:
+        _safe_media_url(response.geturl())
+        declared_size = response.headers.get("Content-Length")
+        if declared_size and int(declared_size) > MAX_VIDEO_BYTES:
+            raise ValueError("视频超过读取上限")
         while chunk := response.read(1024 * 1024):
             total += len(chunk)
             if total > MAX_VIDEO_BYTES:
@@ -122,6 +121,8 @@ def _download_video(url, target):
 
 
 def _probe_duration(video):
+    if not FFPROBE:
+        raise ValueError("找不到 ffprobe；请安装 FFmpeg 或设置 XHS_FFPROBE")
     completed = subprocess.run(
         [FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(video)],
         capture_output=True,
@@ -136,8 +137,12 @@ def _probe_duration(video):
 
 
 def _transcribe(video, workdir):
+    if not (WHISPER and WHISPER_MODEL):
+        return None, "未配置 whisper-cli 与模型；设置 XHS_WHISPER_MODEL 后可生成音频转写"
     if not (Path(WHISPER).is_file() and Path(WHISPER_MODEL).is_file()):
-        return None, "本机未配置 Whisper，未生成音频转写"
+        return None, "Whisper 可执行文件或模型不存在，未生成音频转写"
+    if not FFMPEG:
+        return None, "找不到 ffmpeg，未生成音频转写"
     audio = workdir / "audio.wav"
     subprocess.run(
         [FFMPEG, "-loglevel", "error", "-y", "-i", str(video), "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", str(audio)],
@@ -156,6 +161,8 @@ def _transcribe(video, workdir):
 
 
 def _contact_sheet(video, workdir, duration):
+    if not FFMPEG:
+        raise ValueError("找不到 ffmpeg；请安装 FFmpeg 或设置 XHS_FFMPEG")
     output = workdir / "frames.jpg"
     interval = max(duration / 8.0, 0.25)
     subprocess.run(
@@ -230,9 +237,11 @@ def handle(message):
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "protocolVersion": "2025-06-18",
+                "protocolVersion": (message.get("params") or {}).get(
+                    "protocolVersion", "2025-06-18"
+                ),
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "cairn-xiaohongshu", "version": "0.1.0"},
+                "serverInfo": {"name": "xiaohongshu-browser", "version": "0.1.0"},
             },
         }
     if method == "ping":

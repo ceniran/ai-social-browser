@@ -126,13 +126,24 @@ curl -s localhost:8272/twitter -X POST -H 'content-type: application/json' \
 
 `xiaohongshu-mcp/server.py` 是动作服务之上的只读 STDIO MCP 适配器。它不读取 Cookie，仍通过仅监听本机的动作服务复用固定浏览器登录态。提供 `xhs_feed`、`xhs_search`、`xhs_read`、`xhs_profile` 和 `xhs_watch_video` 五个工具。
 
-`xhs_watch_video` 会下载浏览器实际观察到的短时效 CDN 视频，在临时目录中抽取八格画面并用本机 whisper.cpp 生成原始转写；调用结束后临时视频、音频与画面会自动清理。视频限制默认 100 MiB、10 分钟，可通过环境变量收紧。
+`xhs_watch_video` 会下载浏览器实际观察到的短时效 CDN 视频，在临时目录中抽取八格画面，并在配置了 whisper.cpp 时生成原始转写；调用结束后临时视频、音频与画面会自动清理。视频限制默认 100 MiB、10 分钟，可通过环境变量收紧。
+
+视频画面需要 `ffmpeg` 与 `ffprobe`。音频转写可选：安装 whisper.cpp 后，将 `whisper-cli` 放进 `PATH`，并设置模型路径：
+
+```bash
+export XHS_WHISPER_MODEL=/path/to/ggml-base.bin
+# whisper-cli 不在 PATH 时再设置：
+export XHS_WHISPER=/path/to/whisper-cli
+```
 
 ```toml
 [mcp_servers.xiaohongshu]
 command = "/usr/bin/python3"
 args = ["/opt/ai-social-browser/actions/xiaohongshu-mcp/server.py"]
+env = { XHS_WHISPER_MODEL = "/path/to/ggml-base.bin" }
 ```
+
+适配器默认连接 `http://127.0.0.1:8273/xiaohongshu`；动作服务位于其他地址时设置 `XHS_ACTION_URL`。不要把动作端口或 Chrome CDP 端口直接暴露到公网。
 
 安全阀：`read`/`profile` 只接受 `xiaohongshu.com` 主站 URL，不会被当成任意网页抓取器用。
 
