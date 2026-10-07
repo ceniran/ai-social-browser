@@ -1,17 +1,46 @@
-# 给你的 agent 一个能刷社交平台的浏览器
+# Social Browser：让 agent 刷社交平台，也真正看懂视频
 
-从零开始,搭一台**人和 AI 共用的常驻浏览器**:你用手机遥控它注册登录、养号、过验证码;你的 agent 通过几个 HTTP 动作用它刷推特/小红书,拿到的是结构化 JSON。全程复用同一份真实登录态——不导出 cookie、不存密码、不给 agent 碰凭据。
+一个统一的 `social-browser` MCP：让 agent 读取小红书、X，以及普通本地／HTTPS 视频。视频不是只读标题或字幕，而是实际取得媒体，抽取贯穿全片的八格画面，并可用 whisper.cpp 转写原始声音。
+
+小红书和 X 的登录态由**人和 AI 共用的常驻浏览器**承载：人用手机注册登录、养号或处理验证码，agent 只调用受限的结构化动作，不读取 cookie、不存密码、不碰凭据。普通视频则可直接从显式允许的本地目录或经过安全校验的公网 HTTPS 直链进入同一处理核心。
+
+## 视频能力一眼看懂
+
+| 入口 | 能做什么 | 默认边界 |
+|---|---|---|
+| `xhs_watch_video` | 展开小红书分享短链，读取笔记并处理真实视频 | 小红书始终只读；媒体只接受平台 CDN |
+| `x_watch_video` | 读取帖子并捕获播放器背后的 MP4／HLS 视频 | X 写工具默认不加载；媒体只接受平台 CDN |
+| `video_watch` | 处理普通本地视频或公网 HTTPS 视频直链 | 本地目录需显式授权；拒绝内网地址和不安全跳转 |
+
+三种入口共用：时长与大小限制、八帧抽样、可选 Whisper 转写、临时文件自动清理。MCP 实现与配置见 [`actions/social-browser-mcp/`](actions/social-browser-mcp/) 和 [`actions/README.md`](actions/README.md#统一-social-browser-mcp)。
+
+```mermaid
+flowchart LR
+    Agent[Agent] --> MCP["social-browser MCP"]
+    MCP -->|小红书链接| XHS["小红书只读动作"]
+    MCP -->|X 链接| TW["X 只读动作"]
+    XHS --> Browser["常驻登录浏览器"]
+    TW --> Browser
+    Browser --> Media["平台真实视频流"]
+    MCP -->|本地文件 / HTTPS直链| Media
+    Media --> Core["统一视频处理核心"]
+    Core --> Frames["8帧画面抽样"]
+    Core --> Audio["Whisper声音转写（可选）"]
+```
+
+下面的常驻浏览器、手机接管和动作服务，是平台读取能力的完整部署方式。只想处理普通视频时，不需要部署浏览器、手机遥控或 Cloudflare。
 
 最重要的一件事先说:**这套方案能活,靠的是「headed(带界面)的真 Chrome + 一份人登录出来、长期养着的真实 cookie」——不是遥控,也不是任何自动化技巧。**下面第一节就讲这个,动手前务必看,别把力气花错地方。
 
 一个前提先说清:**你得已经有一个会调 HTTP 工具的 agent**(Claude Code、任何能执行 curl 的 agent 框架都算)。本指南不教怎么搭 agent——连 agent 都还没有的话,先别急着让 AI 刷社交平台。
 
-仓库就两块积木:
+仓库由三块积木组成:
 
 | 目录 | 是什么 | 详细文档 |
 |---|---|---|
 | [`relay/`](relay/README.md) | 常驻 headed Chrome + 手机遥控:画面推流到手机,触摸/键盘打回去。核心资产(那份真实登录态)养在这里,遥控是维护它的通道 | 含风控定位、安全模型、踩坑史 |
 | [`actions/`](actions/README.md) | 把刷推特/小红书包成 `feed / read / like / reply / post` 这样的动词,HTTP 服务。agent 只拿动词,不拿浏览器 | 含动作参考(就是喂给 agent 的工具说明)、踩坑史 |
+| [`actions/social-browser-mcp/`](actions/social-browser-mcp/) | 统一 MCP：连接小红书、X 与普通视频，共用抽帧和声音转写 | 安装、工具清单与安全边界见 actions 文档 |
 
 ```mermaid
 flowchart LR
