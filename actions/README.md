@@ -11,7 +11,7 @@
 | 服务 | 平台 | 动作 | 端口（示例） |
 |---|---|---|---|
 | `twitter-tool` | x.com | 读 3 个 + 写 5 个 | 8272 |
-| `xiaohongshu-tool` | xiaohongshu.com | 只读 4 个 | 8273 |
+| `xiaohongshu-tool` | xiaohongshu.com | 只读 5 个 | 8273 |
 
 那台常驻 Chrome 本体在同仓库的 [`relay/`](../relay/README.md)（服务器上跑 headed Chrome + 远程调试端口，人和工具共用一个浏览器）。本目录就是"接上 relay 之后，agent 能干什么"的答案。
 
@@ -115,11 +115,24 @@ curl -s localhost:8272/twitter -X POST -H 'content-type: application/json' \
 | `feed` | `n?`(≤30) | 发现页信息流 |
 | `search` | `query`(≤100字) `n?` | 搜索笔记 |
 | `read` | `url` `n?`(评论数≤40) | 笔记详情：标题/正文/图片(含 live photo 标记)/标签/互动数/我是否点过赞收藏/评论(含子评论、IP 属地) |
+| `watch` | `url` | 视频笔记 + 浏览器实际播放时观察到的短时效 CDN 地址与时长；不在动作服务内下载 |
 | `profile` | `url` 或 `user`(24位id) `n?` | 用户资料 + 最近笔记 |
 
 和 twitter-tool 一样，`feed`/`search`/`profile` 返回的笔记如果紧接着被 `read`，会在同一个仍开着的列表页里真实点击封面进详情（不 `goto` 硬跳），读完模拟返回把列表页留住；命中时列表结果里会带 `read_navigation: "card_click_available"` 提示可以这么用，`read` 返回结果里的 `navigation` 字段标实际走的是 `feed_card_click` 还是 `direct_url_fallback`；渲染出的 DOM 里找不到对应封面时返回 `{"ok": false, "navigation": "card_click_failed", ...}`，不会自动降级硬跳。命中平台的验证挑战时（如滑块）同样会中断返回 `{"outcome": "challenge", ...}`，提示掏手机去 [`relay/`](../relay/README.md) 里人工过一遍。
 
-**链接怎么传（重要）：** 小红书的笔记链接依赖 `xsec_token`——平台发的防爬签名，跟着链接走。给 `read` 传 URL 时，**直接用 `feed`/`search`/`profile` 返回结果里的 `url` 字段原样传**最稳；网页版复制的完整链接（带 token）也可用；App 分享出来的 `xhslink.com` 短链直接传即可，`read`/`profile` 会**自动展开**成主站链接再走原流程（展开时只向 xhslink 域名发请求、拿到主站链接就停，中途跳到白名单外的域名一律拒绝）。只拿笔记 ID 自己拼的裸链接没有 token，多半打不开（表现为"等待笔记详情超时：链接可能缺少有效 xsec_token"）。
+**链接怎么传（重要）：** 小红书的笔记链接依赖 `xsec_token`——平台发的防爬签名，跟着链接走。给 `read` 传 URL 时，**直接用 `feed`/`search`/`profile` 返回结果里的 `url` 字段原样传**最稳；网页版复制的完整链接（带 token）也可用；App 分享出来的 `xhslink.com` 或 `xhslink.cn` 短链直接传即可，`read`/`watch`/`profile` 会**自动展开**成主站链接再走原流程（展开时只向 xhslink 域名发请求、拿到主站链接就停，中途跳到白名单外的域名一律拒绝）。只拿笔记 ID 自己拼的裸链接没有 token，多半打不开（表现为"等待笔记详情超时：链接可能缺少有效 xsec_token"）。
+
+## 小红书 MCP
+
+`xiaohongshu-mcp/server.py` 是动作服务之上的只读 STDIO MCP 适配器。它不读取 Cookie，仍通过仅监听本机的动作服务复用固定浏览器登录态。提供 `xhs_feed`、`xhs_search`、`xhs_read`、`xhs_profile` 和 `xhs_watch_video` 五个工具。
+
+`xhs_watch_video` 会下载浏览器实际观察到的短时效 CDN 视频，在临时目录中抽取八格画面并用本机 whisper.cpp 生成原始转写；调用结束后临时视频、音频与画面会自动清理。视频限制默认 100 MiB、10 分钟，可通过环境变量收紧。
+
+```toml
+[mcp_servers.xiaohongshu]
+command = "/usr/bin/python3"
+args = ["/opt/ai-social-browser/actions/xiaohongshu-mcp/server.py"]
+```
 
 安全阀：`read`/`profile` 只接受 `xiaohongshu.com` 主站 URL，不会被当成任意网页抓取器用。
 
