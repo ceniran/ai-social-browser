@@ -16,7 +16,7 @@
 ```mermaid
 flowchart LR
     Phone[你的手机] -- "画面/触摸 (WebSocket)" --> Relay["relay :8271"]
-    CF[cloudflared 隧道] --> Relay
+    Public["可选公网入口<br/>Cloudflare Tunnel / 自有反代 / VPN"] -.-> Relay
     Relay -- CDP --> Chrome["常驻 headed Chrome<br/>(xvfb 虚拟屏幕)"]
     Agent[你的 agent] -- "HTTP JSON" --> T["twitter-tool :8272"]
     Agent -- "HTTP JSON" --> X["xiaohongshu-tool :8273"]
@@ -62,7 +62,7 @@ flowchart LR
 1. **必须用专门小号,绝不能拿主号。** 自动化操作违反 X / 小红书的服务条款,有封号风险,后果自负。
 2. **CDP 端口(9333)绝不能出 `127.0.0.1`。** 它没有任何鉴权,谁碰到它,谁就拥有浏览器里一切网站的登录态。
 3. **动作服务(8272/8273)没有鉴权,只绑回环或内网。** 谁能访问端口,谁就能用你的账号发推。跨机器调用要套带鉴权的反代或走内网。
-4. **relay(8271)不裸暴露公网。** 走 cloudflare tunnel 之类的隧道加 TLS,密码必须强——登录没有防爆破,这道门就是全部。
+4. **relay(8271)不裸暴露公网。** Cloudflare Tunnel 只是示例；也可以使用自有反代、VPN，或完全不开放手机远程入口。只要跨公网，就必须加 TLS 与强鉴权——登录没有防爆破,这道门就是全部。
 5. **频率闸的默认值故意很小**(每小时发帖 ≤5、互动 ≤20)。这套东西是给"个人 agent 顺手刷刷"设计的,不做多账号、不做代理池、不做验证码破解——那些是刷量工具的需求,不是本项目的。
 
 ## 全流程
@@ -98,7 +98,7 @@ sudo cp deploy/resource-limits.conf /etc/systemd/system/browser-relay.service.d/
 sudo systemctl daemon-reload && sudo systemctl enable --now browser-relay
 ```
 
-公网入口交给隧道,8271 永远只绑 `127.0.0.1`:
+以下 Cloudflare Tunnel 只是可选的公网入口示例，不是运行 MCP 或动作服务的依赖。也可以换成带 TLS 与鉴权的自有反代／VPN；不需要手机远程接管时可以完全跳过。无论采用哪种方式，8271 都不应直接裸露公网：
 
 ```yaml
 # cloudflared config.yml
